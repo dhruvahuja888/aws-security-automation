@@ -1,0 +1,59 @@
+version: 0.2
+
+env:
+  variables:
+    PROWLER_FRAMEWORK: "cis_1.5_aws"
+    FAIL_ON_FINDINGS: "false"   # change to "true" if you want pipeline to break on HIGH/CRITICAL
+    OUTPUT_DIR: "output"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - echo "Installing Prowler..."
+      - pip install --quiet prowler
+
+  pre_build:
+    commands:
+      - echo "Preparing workspace..."
+      - mkdir -p $OUTPUT_DIR
+      - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+      - echo "Timestamp: $TIMESTAMP"
+
+  build:
+    commands:
+      - echo "Running Prowler CIS Benchmark ($PROWLER_FRAMEWORK)"
+      - prowler aws \
+          --compliance $PROWLER_FRAMEWORK \
+          --output-formats json-asff csv html \
+          --output-directory $OUTPUT_DIR \
+          --timestamp $TIMESTAMP
+
+      - echo "Prowler scan complete."
+
+      # Optional: fail build if high risk findings exist
+      - |
+        if [ "$FAIL_ON_FINDINGS" = "true" ]; then
+          echo "Checking for HIGH/CRITICAL findings..."
+          CRITICAL=$(grep -R "\"Severity\": \"CRITICAL\"" $OUTPUT_DIR -c)
+          HIGH=$(grep -R "\"Severity\": \"HIGH\"" $OUTPUT_DIR -c)
+
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "❌ High severity findings detected. Failing build."
+            exit 1
+          else
+            echo "✔ No high-severity findings."
+          fi
+        fi
+
+  post_build:
+    commands:
+      - echo "Build phase completed."
+      - ls -R $OUTPUT_DIR
+
+artifacts:
+  files:
+    - "**/*"
+  base-directory: "output"
+  discard-paths: no
