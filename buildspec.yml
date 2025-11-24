@@ -18,8 +18,10 @@ phases:
     commands:
       - echo "Preparing workspace..."
       - mkdir -p $OUTPUT_DIR
-      - TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-      - echo "Timestamp: $TIMESTAMP"
+      - |
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        echo "Timestamp: $TIMESTAMP"
+
 
   build:
     commands:
