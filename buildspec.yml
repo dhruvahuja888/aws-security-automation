@@ -3,7 +3,7 @@ version: 0.2
 env:
   variables:
     PROWLER_FRAMEWORK: "cis_1.5_aws"
-    FAIL_ON_FINDINGS: "false"   # change to "true" if you want pipeline to break on HIGH/CRITICAL
+    FAIL_ON_FINDINGS: "false"
     OUTPUT_DIR: "output"
 
 phases:
@@ -24,7 +24,8 @@ phases:
   build:
     commands:
       - echo "Running Prowler CIS Benchmark ($PROWLER_FRAMEWORK)"
-      - prowler aws \
+      - |
+        prowler aws \
           --compliance $PROWLER_FRAMEWORK \
           --output-formats json-asff csv html \
           --output-directory $OUTPUT_DIR \
@@ -32,7 +33,6 @@ phases:
 
       - echo "Prowler scan complete."
 
-      # Optional: fail build if high risk findings exist
       - |
         if [ "$FAIL_ON_FINDINGS" = "true" ]; then
           echo "Checking for HIGH/CRITICAL findings..."
