@@ -26,18 +26,18 @@ phases:
       - echo "Running Prowler CIS Benchmark ($PROWLER_FRAMEWORK)"
       - |
         prowler aws \
-          --compliance $PROWLER_FRAMEWORK \
+          --compliance "$PROWLER_FRAMEWORK" \
           --output-formats json-asff csv html \
-          --output-directory $OUTPUT_DIR \
-          --timestamp $TIMESTAMP
+          --output-directory "$OUTPUT_DIR" \
+          --timestamp "$TIMESTAMP"
 
       - echo "Prowler scan complete."
 
       - |
         if [ "$FAIL_ON_FINDINGS" = "true" ]; then
           echo "Checking for HIGH/CRITICAL findings..."
-          CRITICAL=$(grep -R "\"Severity\": \"CRITICAL\"" $OUTPUT_DIR -c)
-          HIGH=$(grep -R "\"Severity\": \"HIGH\"" $OUTPUT_DIR -c)
+          CRITICAL=$(grep -R "\"Severity\": \"CRITICAL\"" "$OUTPUT_DIR" -c)
+          HIGH=$(grep -R "\"Severity\": \"HIGH\"" "$OUTPUT_DIR" -c)
 
           if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
             echo "❌ High severity findings detected. Failing build."
@@ -50,7 +50,7 @@ phases:
   post_build:
     commands:
       - echo "Build phase completed."
-      - ls -R $OUTPUT_DIR
+      - ls -R "$OUTPUT_DIR"
 
 artifacts:
   files:
