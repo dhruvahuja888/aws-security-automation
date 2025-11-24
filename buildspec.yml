@@ -31,7 +31,6 @@ phases:
           --compliance "$PROWLER_FRAMEWORK" \
           --output-formats json-asff csv html \
           --output-directory "$OUTPUT_DIR" \
-          --timestamp "$TIMESTAMP"
 
       - echo "Prowler scan complete."
 
