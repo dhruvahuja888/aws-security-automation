@@ -3,7 +3,7 @@ version: 0.2
 env:
   variables:
     PROWLER_FRAMEWORK: "cis_1.5_aws"
-    FAIL_ON_FINDINGS: "false"
+    FAIL_ON_FINDINGS: "true"
     OUTPUT_DIR: "output"
 
 phases:
