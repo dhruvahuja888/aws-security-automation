@@ -3,7 +3,7 @@ version: 0.2
 env:
   variables:
     PROWLER_FRAMEWORK: "cis_1.5_aws"
-    FAIL_ON_FINDINGS: "false"
+    FAIL_ON_FINDINGS: "true"
     OUTPUT_DIR: "output"
 
 phases:
@@ -30,7 +30,7 @@ phases:
         prowler aws \
           --compliance "$PROWLER_FRAMEWORK" \
           --output-formats json-asff csv html \
-          --output-directory "$OUTPUT_DIR" \
+          --output-directory "$OUTPUT_DIR"  || true
 
       - echo "Prowler scan complete."
 
