@@ -52,6 +52,8 @@ phases:
     commands:
       - echo "Build phase completed."
       - ls -R "$OUTPUT_DIR"
+      - echo "=== Showing Prowler CIS CSV ==="
+      - cat "$OUTPUT_DIR/compliance/prowler-output-*-cis_1.5_aws.csv"
 
 artifacts:
   files:
