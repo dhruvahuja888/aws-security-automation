@@ -54,6 +54,7 @@ phases:
       - ls -R "$OUTPUT_DIR"
       - echo "=== Showing Prowler CIS CSV ==="
       - cat "$OUTPUT_DIR"/compliance/prowler-output-*.csv
+      - grep ";FAIL;" output/compliance/*.csv
 
 artifacts:
   files:
