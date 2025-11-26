@@ -54,6 +54,7 @@ phases:
       - ls -R "$OUTPUT_DIR"
       - echo "=== Showing Prowler CIS CSV ==="
       - cat "$OUTPUT_DIR"/compliance/prowler-output-*.csv
+      - ls -l "$OUTPUT_DIR"/*.asff.json || echo "No ASFF JSON found"
       - cat "$OUTPUT_DIR"/*.asff.json
       - grep ";FAIL;" output/compliance/*.csv || echo "✔ No FAIL rows found"
 
