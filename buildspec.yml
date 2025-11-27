@@ -57,17 +57,22 @@ phases:
       - ls -l "$OUTPUT_DIR"/*.asff.json || echo "No ASFF JSON found"
       - cat "$OUTPUT_DIR"/*.asff.json
       - grep ";FAIL;" output/compliance/*.csv || echo "✔ No FAIL rows found"
-            - echo "Showing S3 public access findings..."
+      - echo "Showing S3 public access findings..."
       - |
         for f in $OUTPUT_DIR/*.asff.json; do
+          echo "Processing $f"
           jq '
-            .Findings[] |
+            .[] |
             select(
-              (.Resources[].Type == "AwsS3Bucket")
+              (.Resources[]?.Type == "AwsS3Bucket")
               and
               (.Title | test("public"; "i"))
             ) |
-            {Bucket: .Resources[].Id, Title: .Title, Severity: .Severity.Label}
+            {
+              Bucket: (.Resources[]?.Id),
+              Title: .Title,
+              Severity: .Severity.Label
+            }
           ' "$f"
         done
 
