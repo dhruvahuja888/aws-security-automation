@@ -1,0 +1,83 @@
+version: 0.2
+
+env:
+  variables:
+    PROWLER_FRAMEWORK: "cis_1.5_aws"
+    FAIL_ON_FINDINGS: "true"
+    OUTPUT_DIR: "output"
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - echo "Installing Prowler..."
+      - pip install --quiet prowler
+
+  pre_build:
+    commands:
+      - echo "Preparing workspace..."
+      - mkdir -p $OUTPUT_DIR
+      - |
+        TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        echo "Timestamp: $TIMESTAMP"
+
+
+  build:
+    commands:
+      - echo "Running Prowler CIS Benchmark ($PROWLER_FRAMEWORK)"
+      - |
+        prowler aws \
+          --compliance "$PROWLER_FRAMEWORK" \
+          --output-formats json-asff csv html \
+          --output-directory "$OUTPUT_DIR"  || true
+
+      - echo "Prowler scan complete."
+
+      - |
+        if [ "$FAIL_ON_FINDINGS" = "true" ]; then
+          echo "Checking for HIGH/CRITICAL findings..."
+          CRITICAL=$(grep -R "\"Severity\": \"CRITICAL\"" "$OUTPUT_DIR" -c)
+          HIGH=$(grep -R "\"Severity\": \"HIGH\"" "$OUTPUT_DIR" -c)
+
+          if [ "$CRITICAL" -gt 0 ] || [ "$HIGH" -gt 0 ]; then
+            echo "❌ High severity findings detected. Failing build."
+            exit 1
+          else
+            echo "✔ No high-severity findings."
+          fi
+        fi
+
+  post_build:
+    commands:
+      - echo "Build phase completed."
+      - ls -R "$OUTPUT_DIR"
+      - echo "=== Showing Prowler CIS CSV ==="
+      - cat "$OUTPUT_DIR"/compliance/prowler-output-*.csv
+      - ls -l "$OUTPUT_DIR"/*.asff.json || echo "No ASFF JSON found"
+      - cat "$OUTPUT_DIR"/*.asff.json
+      - grep ";FAIL;" output/compliance/*.csv || echo "✔ No FAIL rows found"
+      - echo "Showing S3 public access findings..."
+      - |
+        for f in $OUTPUT_DIR/*.asff.json; do
+          echo "Processing $f"
+          jq '
+            .[] |
+            select(
+              (.Resources[]?.Type == "AwsS3Bucket")
+              and
+              (.Title | test("public"; "i"))
+            ) |
+            {
+              Bucket: (.Resources[]?.Id),
+              Title: .Title,
+              Severity: .Severity.Label
+            }
+          ' "$f"
+        done
+
+artifacts:
+  files:
+    - "**/*"
+  base-directory: "output"
+  discard-paths: no
