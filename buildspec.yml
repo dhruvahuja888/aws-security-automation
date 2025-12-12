@@ -27,7 +27,7 @@ phases:
       - echo "Preparing workspace..."
       - mkdir -p "$OUTPUT_DIR"
       - |
-        export TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
         echo "TIMESTAMP=$TIMESTAMP" > "$OUTPUT_DIR/build_metadata.txt"
         echo "Working timestamp: $TIMESTAMP"
 
@@ -43,7 +43,7 @@ phases:
         DEMO_BUCKET="${DEMO_BUCKET_PREFIX}-${TIMESTAMP}"
         echo "Demo bucket: $DEMO_BUCKET"
         REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region || echo "eu-central-1")
-        aws s3api create-bucket --bucket "$DEMO_BUCKET" --create-bucket-configuration LocationConstraint="$REGION" 
+        aws s3api create-bucket --bucket "$DEMO_BUCKET" --create-bucket-configuration LocationConstraint="$REGION" || true
         aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false || true
         cat > /tmp/public_policy.json <<POL
         {
@@ -87,7 +87,7 @@ phases:
           aws configservice describe-configuration-recorders > "$OUTPUT_DIR/config_recorders_${TIMESTAMP}.json" || true
           aws configservice describe-config-rules --config-rule-names "$CONFIG_RULE_NAME" > "$OUTPUT_DIR/config_rule_${TIMESTAMP}.json" || true
           # Continue to fail the build (non-discovery)
-          exit 0
+          exit 2
         fi
         echo "Bucket discovered by Config."
 
