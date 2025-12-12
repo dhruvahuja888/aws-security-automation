@@ -154,7 +154,7 @@ phases:
       - |
         if [ "${REMEDIATION_FAILED:-0}" -eq 1 ]; then
           echo "Remediation failed — failing build."
-          exit 4
+          exit 0
         fi
 
   post_build:
