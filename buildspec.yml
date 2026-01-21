@@ -2,7 +2,7 @@ version: 0.2
 
 env:
   variables:
-    PROWLER_FRAMEWORK: "cis_1.5_aws"
+    PROWLER_FRAMEWORK: "cis_1.2_aws"
     FAIL_ON_FINDINGS: "false"
     OUTPUT_DIR: "output"
     DEMO_BUCKET_PREFIX: "thesis-demo-bucket"
