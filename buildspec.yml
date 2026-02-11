@@ -119,6 +119,7 @@ phases:
       - |
         START2=$(date +%s)
         REMEDIED=0
+        aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
         while [ $(( $(date +%s) - START2 )) -lt "$REMEDIATION_TIMEOUT_SECONDS" ]; do
           echo "Checking remediation status..."
           STATUS2=$(aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json | jq -r --arg BUCKET "$DEMO_BUCKET" '.EvaluationResults[] | select(.EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId == $BUCKET) | .ComplianceType')
@@ -147,7 +148,7 @@ phases:
       - |
         # cleanup (best effort)
         aws s3api delete-bucket-policy --bucket "$DEMO_BUCKET" || true
-        aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
+        # aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
         aws s3 rb s3://"$DEMO_BUCKET" --force || true
 
       - |
