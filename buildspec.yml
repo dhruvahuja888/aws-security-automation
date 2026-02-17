@@ -98,14 +98,22 @@ phases:
       - echo "STEP 5- Poll Config for NON_COMPLIANT for the demo bucket"
       - |
         POLL_START=$(date +%s)
+        DETECTION_START_TIME=$(date +%s)
         NON_COMPLIANT_FOUND=0
+
         while [ $(( $(date +%s) - POLL_START )) -lt "$REMEDIATION_TIMEOUT_SECONDS" ]; do
           STATUS=$(aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json | jq -r --arg BUCKET "$DEMO_BUCKET" '.EvaluationResults[] | select(.EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId == $BUCKET) | .ComplianceType')
           echo "Compliance status for $DEMO_BUCKET: '$STATUS'"
+
           if [ "$STATUS" = "NON_COMPLIANT" ]; then
             NON_COMPLIANT_FOUND=1
+            DETECTION_END_TIME=$(date +%s)
+            NON_COMPLIANT_DURATION=$((DETECTION_END_TIME - DETECTION_START_TIME))
+            echo "Time to detect NON_COMPLIANT: ${NON_COMPLIANT_DURATION} seconds"
+            echo "NON_COMPLIANT_DURATION=${NON_COMPLIANT_DURATION}" >> "$OUTPUT_DIR/timings_${TIMESTAMP}.txt"
             break
           fi
+
           sleep 5
         done
 
@@ -118,16 +126,29 @@ phases:
       - echo "STEP 6- Wait for remediation to occur (poll for COMPLIANT)"
       - |
         START2=$(date +%s)
+        REMEDIATION_START_TIME=$(date +%s)
         REMEDIED=0
-        aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
+
+        # Apply remediation (block public access)
+        aws s3api put-public-access-block --bucket "$DEMO_BUCKET" \
+          --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
+
         while [ $(( $(date +%s) - START2 )) -lt "$REMEDIATION_TIMEOUT_SECONDS" ]; do
           echo "Checking remediation status..."
+
           STATUS2=$(aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json | jq -r --arg BUCKET "$DEMO_BUCKET" '.EvaluationResults[] | select(.EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId == $BUCKET) | .ComplianceType')
+
           echo "Status: '$STATUS2'"
+
           if [ "$STATUS2" = "COMPLIANT" ]; then
             REMEDIED=1
+            REMEDIATION_END_TIME=$(date +%s)
+            REMEDIATION_DURATION=$((REMEDIATION_END_TIME - REMEDIATION_START_TIME))
+            echo "Time to detect COMPLIANT (remediation complete): ${REMEDIATION_DURATION} seconds"
+            echo "REMEDIATION_DURATION=${REMEDIATION_DURATION}" >> "$OUTPUT_DIR/timings_${TIMESTAMP}.txt"
             break
           fi
+
           sleep "$REMEDIATION_POLL_INTERVAL"
         done
 
@@ -139,6 +160,7 @@ phases:
           echo "Remediation successful for $DEMO_BUCKET"
           REMEDIATION_FAILED=0
         fi
+
 
       - echo "STEP 7- Capture evidence & cleanup"
       - aws s3api get-bucket-policy --bucket "$DEMO_BUCKET" --output json > "$OUTPUT_DIR/${DEMO_BUCKET}_policy.json" || true
