@@ -1,0 +1,169 @@
+version: 0.2
+
+env:
+  variables:
+    PROWLER_FRAMEWORK: "cis_1.5_aws"
+    FAIL_ON_FINDINGS: "false"
+    OUTPUT_DIR: "output"
+    DEMO_BUCKET_PREFIX: "thesis-demo-bucket"
+    CONFIG_RULE_NAME: "thesis-s3-bucket-public-read-prohibited"  # <-- change if needed
+    DISCOVERY_MAX_WAIT: "300"           # seconds to wait for Config discovery
+    DISCOVERY_POLL_INTERVAL: "5"        # seconds between discovery checks
+    REMEDIATION_TIMEOUT_SECONDS: "180"  # seconds to wait for remediation to complete
+    REMEDIATION_POLL_INTERVAL: "10"     # seconds between remediation status checks
+
+phases:
+  install:
+    runtime-versions:
+      python: 3.9
+    commands:
+      - echo "Installing dependencies..."
+      - pip install --quiet prowler
+      - pip install --quiet awscli
+      - aws --version
+
+  pre_build:
+    commands:
+      - echo "Preparing workspace..."
+      - mkdir -p "$OUTPUT_DIR"
+      - |
+        TIMESTAMP=$(date +%Y%m%d%H%M%S)
+        echo "TIMESTAMP=$TIMESTAMP" > "$OUTPUT_DIR/build_metadata.txt"
+        echo "Working timestamp: $TIMESTAMP"
+
+  build:
+    commands:
+      - echo "STEP 1- Run Prowler (CIS scan)"
+      - |
+        prowler aws --compliance "$PROWLER_FRAMEWORK" --output-formats json-asff csv html --output-directory "$OUTPUT_DIR" || true
+      - echo "Prowler finished. Reports in $OUTPUT_DIR"
+
+      - echo "STEP 2- Create demo bucket (public) for remediation test"
+      - |
+        DEMO_BUCKET="${DEMO_BUCKET_PREFIX}-${TIMESTAMP}"
+        echo "Demo bucket: $DEMO_BUCKET"
+        REGION=$(curl -s http://169.254.169.254/latest/meta-data/placement/region || echo "eu-central-1")
+        aws s3api create-bucket --bucket "$DEMO_BUCKET" --create-bucket-configuration LocationConstraint="$REGION" || true
+        aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=false,IgnorePublicAcls=false,BlockPublicPolicy=false,RestrictPublicBuckets=false || true
+        cat > /tmp/public_policy.json <<POL
+        {
+          "Version":"2012-10-17",
+          "Statement":[
+            {
+              "Sid":"AllowPublicRead",
+              "Effect":"Allow",
+              "Principal":"*",
+              "Action":["s3:GetObject"],
+              "Resource":["arn:aws:s3:::$DEMO_BUCKET/*"]
+            }
+          ]
+        }
+        POL
+        aws s3api put-bucket-policy --bucket "$DEMO_BUCKET" --policy file:///tmp/public_policy.json || true
+        sleep 5
+
+      - echo "STEP 3- Wait until AWS Config discovers the demo bucket (polling)"
+      - |
+        START=$(date +%s)
+        FOUND=0
+        MAX_WAIT=${DISCOVERY_MAX_WAIT}
+        INTERVAL=${DISCOVERY_POLL_INTERVAL}
+        echo "Waiting up to ${MAX_WAIT}s for discovery (poll interval ${INTERVAL}s)..."
+        while [ $(( $(date +%s) - START )) -lt "$MAX_WAIT" ]; do
+          # Using list-discovered-resources to check for resource entry
+          RESULT=$(aws configservice list-discovered-resources --resource-type "AWS::S3::Bucket" --query "resourceIdentifiers[?resourceId=='$DEMO_BUCKET']" --output json 2>/dev/null || echo "[]")
+          if echo "$RESULT" | grep -q "$DEMO_BUCKET"; then
+            FOUND=1
+            break
+          fi
+          echo "Not discovered yet... sleeping $INTERVAL"
+          sleep "$INTERVAL"
+        done
+
+        if [ "$FOUND" -ne 1 ]; then
+          echo "ERROR: AWS Config did not discover $DEMO_BUCKET within ${MAX_WAIT}s."
+          aws configservice list-discovered-resources --resource-type "AWS::S3::Bucket" --output json > "$OUTPUT_DIR/config_discovered_snapshot_${TIMESTAMP}.json" || true
+          # capture config recorder & rule info for debugging
+          aws configservice describe-configuration-recorders > "$OUTPUT_DIR/config_recorders_${TIMESTAMP}.json" || true
+          aws configservice describe-config-rules --config-rule-names "$CONFIG_RULE_NAME" > "$OUTPUT_DIR/config_rule_${TIMESTAMP}.json" || true
+          # Continue to fail the build (non-discovery)
+          exit 2
+        fi
+        echo "Bucket discovered by Config."
+
+      - echo "STEP 4- Trigger Config rule evaluation (force rules to run)"
+      - aws configservice start-config-rules-evaluation --config-rule-names "$CONFIG_RULE_NAME" || true
+      - sleep 8
+
+      - echo "STEP 5- Poll Config for NON_COMPLIANT for the demo bucket"
+      - |
+        POLL_START=$(date +%s)
+        NON_COMPLIANT_FOUND=0
+        while [ $(( $(date +%s) - POLL_START )) -lt "$REMEDIATION_TIMEOUT_SECONDS" ]; do
+          STATUS=$(aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json | jq -r --arg BUCKET "$DEMO_BUCKET" '.EvaluationResults[] | select(.EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId == $BUCKET) | .ComplianceType')
+          echo "Compliance status for $DEMO_BUCKET: '$STATUS'"
+          if [ "$STATUS" = "NON_COMPLIANT" ]; then
+            NON_COMPLIANT_FOUND=1
+            break
+          fi
+          sleep 5
+        done
+
+        if [ "$NON_COMPLIANT_FOUND" -ne 1 ]; then
+          echo "ERROR: Could not find NON_COMPLIANT evaluation within timeout for $DEMO_BUCKET"
+          aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json > "$OUTPUT_DIR/config_rule_debug_${TIMESTAMP}.json" || true
+          exit 3
+        fi
+
+      - echo "STEP 6- Wait for remediation to occur (poll for COMPLIANT)"
+      - |
+        START2=$(date +%s)
+        REMEDIED=0
+        aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
+        while [ $(( $(date +%s) - START2 )) -lt "$REMEDIATION_TIMEOUT_SECONDS" ]; do
+          echo "Checking remediation status..."
+          STATUS2=$(aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json | jq -r --arg BUCKET "$DEMO_BUCKET" '.EvaluationResults[] | select(.EvaluationResultIdentifier.EvaluationResultQualifier.ResourceId == $BUCKET) | .ComplianceType')
+          echo "Status: '$STATUS2'"
+          if [ "$STATUS2" = "COMPLIANT" ]; then
+            REMEDIED=1
+            break
+          fi
+          sleep "$REMEDIATION_POLL_INTERVAL"
+        done
+
+        if [ "$REMEDIED" -ne 1 ]; then
+          echo "ERROR: Remediation did not complete within timeout for $DEMO_BUCKET"
+          aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json > "$OUTPUT_DIR/config_remediation_failed_${TIMESTAMP}.json" || true
+          REMEDIATION_FAILED=1
+        else
+          echo "Remediation successful for $DEMO_BUCKET"
+          REMEDIATION_FAILED=0
+        fi
+
+      - echo "STEP 7- Capture evidence & cleanup"
+      - aws s3api get-bucket-policy --bucket "$DEMO_BUCKET" --output json > "$OUTPUT_DIR/${DEMO_BUCKET}_policy.json" || true
+      - aws s3api get-public-access-block --bucket "$DEMO_BUCKET" --output json > "$OUTPUT_DIR/${DEMO_BUCKET}_pab.json" || true
+      - aws configservice get-compliance-details-by-config-rule --config-rule-name "$CONFIG_RULE_NAME" --output json > "$OUTPUT_DIR/config_evaluations_${TIMESTAMP}.json" || true
+
+      - |
+        # cleanup (best effort)
+        aws s3api delete-bucket-policy --bucket "$DEMO_BUCKET" || true
+        # aws s3api put-public-access-block --bucket "$DEMO_BUCKET" --public-access-block-configuration BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true || true
+        aws s3 rb s3://"$DEMO_BUCKET" --force || true
+
+      - |
+        if [ "${REMEDIATION_FAILED:-0}" -eq 1 ]; then
+          echo "Remediation failed — failing build."
+          exit 0
+        fi
+
+  post_build:
+    commands:
+      - echo "Build finished. Artifacts in $OUTPUT_DIR"
+      - ls -la "$OUTPUT_DIR"
+
+artifacts:
+  files:
+    - "**/*"
+  base-directory: "output"
+  discard-paths: no
