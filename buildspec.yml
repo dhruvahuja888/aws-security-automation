@@ -65,6 +65,7 @@ phases:
       - echo "STEP 3- Wait until AWS Config discovers the demo bucket (polling)"
       - |
         START=$(date +%s)
+        DISCOVERY_START_TIME=$(date +%s)
         FOUND=0
         MAX_WAIT=${DISCOVERY_MAX_WAIT}
         INTERVAL=${DISCOVERY_POLL_INTERVAL}
@@ -74,6 +75,11 @@ phases:
           RESULT=$(aws configservice list-discovered-resources --resource-type "AWS::S3::Bucket" --query "resourceIdentifiers[?resourceId=='$DEMO_BUCKET']" --output json 2>/dev/null || echo "[]")
           if echo "$RESULT" | grep -q "$DEMO_BUCKET"; then
             FOUND=1
+            DISCOVERY_END_TIME=$(date +%s)
+            DISCOVERY_DURATION=$((DISCOVERY_END_TIME - DISCOVERY_START_TIME))
+            echo "Bucket discovered by Config."
+            echo "Time to discover resource in Config: ${DISCOVERY_DURATION} seconds"
+            echo "DISCOVERY_DURATION=${DISCOVERY_DURATION}" >> "$OUTPUT_DIR/timings_${TIMESTAMP}.txt"
             break
           fi
           echo "Not discovered yet... sleeping $INTERVAL"
@@ -90,6 +96,7 @@ phases:
           exit 2
         fi
         echo "Bucket discovered by Config."
+
 
       - echo "STEP 4- Trigger Config rule evaluation (force rules to run)"
       - aws configservice start-config-rules-evaluation --config-rule-names "$CONFIG_RULE_NAME" || true
